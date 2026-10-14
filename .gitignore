@@ -1,40 +1,14 @@
-# Rust artifacts
-target/
-
-# Node artifacts
-build/
-prebuilds/
+# npm dependencies, only needed by `tree-sitter generate`
 node_modules/
 
-# Swift artifacts
-.build/
-
-# Go artifacts
-_obj/
-
-# Python artifacts
-.venv/
-dist/
-*.egg-info
-*.whl
-
-# C artifacts
-*.a
+# Compiled parsers and build output of `tree-sitter build`
 *.so
-*.so.*
 *.dylib
 *.dll
-*.pc
-
-# Example dirs
-/examples/*/
-
-# Grammar volatiles
 *.wasm
-*.obj
 *.o
+*.obj
+build/
 
-# Archives
-*.tar.gz
-*.tgz
-*.zip
+# Debug output of `tree-sitter parse --debug-graph`
+log.html

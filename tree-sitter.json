@@ -6,24 +6,25 @@
       "path": ".",
       "scope": "source.razor",
       "file-types": [
-        "razor"
+        "razor",
+        "cshtml"
       ],
       "injection-regex": "^razor$",
       "highlights": [
         "queries/highlights.scm"
+      ],
+      "injections": [
+        "queries/injections.scm"
       ]
     }
   ],
   "metadata": {
-    "links": {
-      "repository": "https://github.com/tris203/tree-sitter-razor"
-    },
-    "version": "0.1.1",
+    "version": "0.1.0",
     "license": "MIT",
+    "description": "Razor grammar for tree-sitter",
     "authors": [
       {
-        "name": "tris203",
-        "email": "admin@snappeh.com"
+        "name": "Gael Mahfoudi"
       }
     ]
   }

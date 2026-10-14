@@ -1,19 +1,67 @@
 /**
  * @file Razor grammar for tree-sitter
- * @author Tristan Knight <admin@snappeh.com>
+ * @author Gael Mahfoudi
  * @license MIT
+ *
+ * Forked from the initial implementation of tree-sitter-razor by Tristan Knight
+ * (https://github.com/tris203/tree-sitter-razor), released under the MIT license.
+ * See LICENSE for the full notices.
+ *
+ * Razor mixes three languages in one file: Razor itself (`@` directives,
+ * expressions and control structures), C# (inside `@code` blocks and
+ * expressions) and HTML (the markup). This grammar:
+ *
+ * - extends the C# grammar of tree-sitter-c-sharp, so every C# construct is
+ *   available as is, and adds the Razor rules on top of it;
+ * - parses HTML only coarsely: an `element` node covers a whole tag with its
+ *   content, and the editor re-parses it with the real HTML grammar through an
+ *   injection (see queries/injections.scm). The rules below only need to find
+ *   where markup starts and ends, and where Razor code is nested inside it.
+ *
+ * Naming conventions:
+ * - `razor_*` nodes are Razor constructs (`razor_if`, `razor_block`, ...);
+ * - `at_*` anonymous nodes are the `@keyword` that starts a construct
+ *   (`@if` is aliased to "at_if"), so highlight queries can target them;
+ * - rules starting with `_` are hidden: they don't show up in the tree.
  */
 
-/// <reference types="tree-sitter-cli/dsl" />
-// @ts-check
-
 const CSHARP = require("tree-sitter-c-sharp/grammar").default;
+
+/**
+ * Attributes of an HTML start tag: plain HTML attributes, Razor attributes
+ * (`@onclick="..."`) and Razor comments, in any order, optionally separated
+ * by a space.
+ *
+ * @param {GrammarSymbols<string>} $
+ */
+const tagAttributes = ($) =>
+  optional(
+    repeat(
+      prec.left(
+        seq(
+          choice(
+            $._html_attribute,
+            $._boolean_html_attribute,
+            $.razor_html_attribute,
+            $.razor_comment,
+          ),
+          optional(" "),
+        ),
+      ),
+    ),
+  );
 
 module.exports = grammar(CSHARP, {
   name: "razor",
 
+  // razor_comment is deliberately NOT an extra: a node that is both an extra
+  // and part of other rules makes the parser fail at the end of the file as
+  // soon as a comment is nested in an element or a block. It is listed
+  // explicitly wherever it can appear instead (_node, razor_switch, tags).
   extras: ($) => [$.comment, /\s+/],
 
+  // Mostly inherited from the C# grammar (preprocessor directives can appear
+  // at several levels), plus the ambiguities added by Razor.
   conflicts: ($, o) => [
     [$.razor_explicit_expression, $._expression_statement_expression],
 
@@ -45,12 +93,21 @@ module.exports = grammar(CSHARP, {
 
     [$.destructor_declaration, $._simple_name],
 
+    // `@{` starts a code block, but `{` can also open a C# initializer
     [$.initializer_expression, $.razor_block],
     [$.field_declaration, $.local_declaration_statement],
     ...o,
   ],
 
   rules: {
+    // ------------------------------------------------------------------------
+    // File structure
+    // ------------------------------------------------------------------------
+
+    /**
+     * A Razor file: the directives first (`@page`, `@using`, `@inject`...),
+     * then the content (markup, Razor code and `@code` blocks).
+     */
     compilation_unit: ($) =>
       seq(
         repeat(
@@ -76,6 +133,12 @@ module.exports = grammar(CSHARP, {
         repeat(choice($._node, $.razor_block)),
       ),
 
+    // ------------------------------------------------------------------------
+    // C# overrides
+    // ------------------------------------------------------------------------
+
+    // Same as the C# identifier, without the optional leading `@` of verbatim
+    // identifiers (`@class`): in Razor, `@` is always the Razor marker.
     _identifier_token: (_) =>
       token(
         // @ts-ignore
@@ -83,6 +146,8 @@ module.exports = grammar(CSHARP, {
       ),
     identifier: ($) => choice($._identifier_token, $._reserved_identifier),
 
+    // What a C# block can contain: statements, but also markup and Razor code,
+    // since Razor lets markup appear inside C# blocks.
     _csharp_nodes: ($) =>
       choice(
         $.statement,
@@ -101,6 +166,15 @@ module.exports = grammar(CSHARP, {
 
     block: ($) => seq("{", repeat($._csharp_nodes), "}"),
 
+    // ------------------------------------------------------------------------
+    // Content nodes
+    // ------------------------------------------------------------------------
+
+    /**
+     * Anything that can appear in the content of the file, of an element or of
+     * a Razor block: markup, comments, Razor expressions and control
+     * structures.
+     */
     _node: ($) =>
       prec.right(
         choice(
@@ -124,13 +198,21 @@ module.exports = grammar(CSHARP, {
         ),
       ),
 
+    // The `@` that switches from markup to Razor code.
     _razor_marker: (_) => token("@"),
 
+    // `@@` is a literal `@` in the markup.
     razor_escape: ($) =>
       seq(alias(/@{2}/, "at_at_escape"), alias($._html_text, $.element)),
 
+    // ------------------------------------------------------------------------
+    // Directives
+    // ------------------------------------------------------------------------
+
+    // @page "/route"
     razor_page_directive: ($) =>
       seq(alias(seq($._razor_marker, "page"), "at_page"), $.string_literal),
+    // @using System.Linq, @using static ..., @using Alias = Some.Type
     razor_using_directive: ($) =>
       seq(
         alias(seq($._razor_marker, "using"), "at_using"),
@@ -139,11 +221,13 @@ module.exports = grammar(CSHARP, {
           seq(optional("static"), optional("unsafe"), $._name),
         ),
       ),
+    // @model MyViewModel (MVC views)
     razor_model_directive: ($) =>
       seq(
         alias(seq($._razor_marker, "model"), "at_model"),
         field("name", $._name),
       ),
+    // @preservewhitespace true
     razor_preservewhitespace_directive: ($) =>
       seq(
         alias(
@@ -152,41 +236,49 @@ module.exports = grammar(CSHARP, {
         ),
         $.boolean_literal,
       ),
+    // @attribute [Authorize]
     razor_attribute_directive: ($) =>
       seq(
         alias(seq($._razor_marker, "attribute"), "at_attribute"),
         $.attribute_list,
       ),
+    // @implements IDisposable
     razor_implements_directive: ($) =>
       seq(
         alias(seq($._razor_marker, "implements"), "at_implements"),
         field("name", $._name),
       ),
+    // @layout MainLayout
     razor_layout_directive: ($) =>
       seq(
         alias(seq($._razor_marker, "layout"), "at_layout"),
         field("name", $._name),
       ),
+    // @inherits ComponentBase
     razor_inherits_directive: ($) =>
       seq(
         alias(seq($._razor_marker, "inherits"), "at_inherits"),
         field("name", $._name),
       ),
+    // @typeparam TItem
     razor_typeparam_directive: ($) =>
       seq(
         alias(seq($._razor_marker, "typeparam"), "at_typeparam"),
         field("name", $._name),
       ),
+    // @inject ILogger<Index> Logger
     razor_inject_directive: ($) =>
       seq(
         alias(seq($._razor_marker, "inject"), "at_inject"),
         $.variable_declaration,
       ),
+    // @namespace My.App.Pages
     razor_namespace_directive: ($) =>
       seq(
         alias(seq($._razor_marker, "namespace"), "at_namespace"),
         $.qualified_name,
       ),
+    // @rendermode InteractiveServer
     razor_rendermode_directive: ($) =>
       seq(
         alias(seq($._razor_marker, "rendermode"), "at_rendermode"),
@@ -195,28 +287,41 @@ module.exports = grammar(CSHARP, {
     razor_rendermode: (_) =>
       choice("InteractiveServer", "InteractiveWebAssembly", "InteractiveAuto"),
 
+    // Tag helper directives (MVC): either a string, or `Target, Assembly`
+    // where the target may be the `*` wildcard.
     _taghelper_target: ($) =>
       seq(
         choice($.identifier, alias("*", $.taghelper_wildcard)),
         ",",
         field("assembly", $._name),
       ),
+    // @addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
     razor_addtaghelper_directive: ($) =>
       seq(
         alias(seq($._razor_marker, "addTagHelper"), "at_addtaghelper"),
         choice($.string_literal, $._taghelper_target),
       ),
+    // @removeTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
     razor_removetaghelper_directive: ($) =>
       seq(
         alias(seq($._razor_marker, "removeTagHelper"), "at_removetaghelper"),
         choice($.string_literal, $._taghelper_target),
       ),
+    // @tagHelperPrefix th:
     razor_taghelperprefix_directive: ($) =>
       seq(
         alias(seq($._razor_marker, "tagHelperPrefix"), "at_taghelperprefix"),
         choice($.string_literal, $.identifier),
       ),
 
+    // ------------------------------------------------------------------------
+    // Code blocks and expressions
+    // ------------------------------------------------------------------------
+
+    /**
+     * A C# code block: `@code { ... }`, `@functions { ... }` or `@{ ... }`.
+     * Holds C# declarations and statements, and markup.
+     */
     razor_block: ($) =>
       prec.left(
         seq(
@@ -230,6 +335,7 @@ module.exports = grammar(CSHARP, {
         ),
       ),
 
+    // @(expression): the expression is delimited by the parentheses.
     razor_explicit_expression: ($) =>
       prec.right(
         seq(
@@ -238,9 +344,18 @@ module.exports = grammar(CSHARP, {
         ),
       ),
 
+    // @expression: the expression ends where the C# expression ends.
     razor_implicit_expression: ($) =>
       seq(alias($._razor_marker, "at_implicit"), prec.left($.expression)),
 
+    // ------------------------------------------------------------------------
+    // Control structures
+    //
+    // They mirror their C# counterpart, but their bodies hold blended content
+    // (markup and C# statements mixed), and they start with `@`.
+    // ------------------------------------------------------------------------
+
+    // @lock (obj) { ... }
     razor_lock: ($) =>
       seq(
         alias(seq($._razor_marker, "lock"), "at_lock"),
@@ -252,6 +367,7 @@ module.exports = grammar(CSHARP, {
         "}",
       ),
 
+    // @using (var x = ...) { ... }
     razor_compound_using: ($) =>
       seq(
         alias(seq($._razor_marker, "using"), "at_using"),
@@ -266,6 +382,7 @@ module.exports = grammar(CSHARP, {
         "}",
       ),
 
+    // @if (cond) { ... } else if (cond) { ... } else { ... }
     razor_if: ($) =>
       seq(
         alias(seq($._razor_marker, "if"), "at_if"),
@@ -274,6 +391,7 @@ module.exports = grammar(CSHARP, {
         repeat(choice($.razor_else_if, $.razor_else)),
       ),
 
+    // @try { ... } catch (Exception e) when (...) { ... } finally { ... }
     razor_try: ($) =>
       prec.right(
         seq(
@@ -285,6 +403,8 @@ module.exports = grammar(CSHARP, {
         ),
       ),
 
+    // `catch`, `finally` and `else` get a high precedence so that they are
+    // read as the continuation of the Razor structure, not as markup text.
     razor_catch: ($) =>
       seq(
         token(prec(10, "catch")),
@@ -320,6 +440,7 @@ module.exports = grammar(CSHARP, {
         "}"
       ),
 
+    // @switch (value) { case X: ... break; default: ... }
     razor_switch: ($) =>
       seq(
         alias(seq($._razor_marker, "switch"), "at_switch"),
@@ -331,6 +452,7 @@ module.exports = grammar(CSHARP, {
         "}",
       ),
 
+    // The parenthesized condition of @if, @switch, @while...
     razor_condition: ($) => prec(10, seq("(", $.expression, ")")),
 
     razor_switch_case: ($) =>
@@ -346,8 +468,10 @@ module.exports = grammar(CSHARP, {
     razor_switch_default: ($) =>
       prec.right(seq("default", ":", $._blended_content, optional("break;"))),
 
+    // The case label is kept as raw text, up to the colon.
     razor_case_condition: (_) => /[^:]+/,
 
+    // @for (init; condition; update)
     _razor_for_initializer: ($) =>
       seq(
         alias(seq($._razor_marker, "for"), "at_for"),
@@ -371,6 +495,10 @@ module.exports = grammar(CSHARP, {
         "}",
       ),
 
+    /**
+     * The body of a Razor control structure: markup, Razor code, C#
+     * statements and comments, mixed freely.
+     */
     _blended_content: ($) =>
       repeat1(
         prec(
@@ -379,6 +507,7 @@ module.exports = grammar(CSHARP, {
         ),
       ),
 
+    // @foreach (var item in items), also with a tuple: (var (a, b) in pairs)
     _razor_foreach_initializer: ($) =>
       seq(
         alias(seq($._razor_marker, "foreach"), "at_foreach"),
@@ -403,6 +532,7 @@ module.exports = grammar(CSHARP, {
         "}",
       ),
 
+    // @while (cond) { ... }
     razor_while: ($) =>
       seq(
         alias(seq($._razor_marker, "while"), "at_while"),
@@ -414,6 +544,7 @@ module.exports = grammar(CSHARP, {
 
     _razor_while_condition: ($) => seq("while", $.razor_condition),
 
+    // @do { ... } while (cond);
     razor_do_while: ($) =>
       seq(
         alias(seq($._razor_marker, "do"), "at_do"),
@@ -424,6 +555,7 @@ module.exports = grammar(CSHARP, {
         ";",
       ),
 
+    // @section Scripts { ... } (MVC layouts)
     razor_section: ($) =>
       seq(
         alias(seq($._razor_marker, "section"), "at_section"),
@@ -433,6 +565,7 @@ module.exports = grammar(CSHARP, {
         "}",
       ),
 
+    // `@:` inside C# code: the rest of the line is markup.
     explicit_line_transition: ($) =>
       prec.left(
         seq(
@@ -441,8 +574,23 @@ module.exports = grammar(CSHARP, {
         ),
       ),
 
+    // ------------------------------------------------------------------------
+    // Comments
+    // ------------------------------------------------------------------------
+
+    // @* ... *@ (see `extras` for why it isn't an extra)
     razor_comment: ($) => seq("@*", optional($._razor_comment_text), "*@"),
     _razor_comment_text: (_) => repeat1(/.|\n|\r/),
+
+    // ------------------------------------------------------------------------
+    // Razor attributes
+    // ------------------------------------------------------------------------
+
+    /**
+     * The name of a Razor attribute: `@onclick`, `@bind`, `@ref`... and any
+     * other `@Name` (component parameters). An optional modifier follows:
+     * `@onclick:preventDefault`, `@bind:culture`...
+     */
     razor_attribute_name: ($) =>
       seq(
         $._razor_marker,
@@ -454,6 +602,7 @@ module.exports = grammar(CSHARP, {
             token(prec(10, /on[a-z]+/i)),
             "key",
             "ref",
+            // lowest precedence: only used when no keyword above matches
             token(prec(-1, /[a-zA-Z_][a-zA-Z0-9_]*/)),
           ),
           optional($.razor_attribute_modifier),
@@ -463,14 +612,22 @@ module.exports = grammar(CSHARP, {
     razor_attribute_modifier: (_) =>
       choice(":culture", ":preventDefault", ":stopPropagation"),
 
+    // <!-- ... -->
     html_comment: ($) => seq("<!--", optional($._razor_comment_text), "-->"),
     _html_comment_text: (_) => repeat1(/.|\n|\r/),
 
-    // HTML Base Definitions
+    // ------------------------------------------------------------------------
+    // HTML
+    //
+    // Just enough HTML to delimit the markup: the editor re-parses elements
+    // with the real HTML grammar (see queries/injections.scm).
+    // ------------------------------------------------------------------------
+
     _tag_name: (_) => /[a-zA-Z0-9-:]+/,
     _end_tag: ($) => seq("</", $._tag_name, ">"),
     _html_attribute_name: (_) => /[a-zA-Z0-9-:]+/,
     _boolean_html_attribute: (_) => /[a-zA-Z0-9-:]+/,
+    // A quoted value, which may contain Razor expressions: class="btn @cls"
     _html_attribute_value: ($) =>
       seq(
         '"',
@@ -483,8 +640,13 @@ module.exports = grammar(CSHARP, {
         ),
         '"',
       ),
+    // Text between tags. Stops at `@` so that Razor code is found in it.
     _html_text: (_) => /[^<>&@.(\s]([^<>&@]*[^<>&@\s])?/,
 
+    /**
+     * The value of a Razor attribute is C# code, not text:
+     * `@onclick="Save"`, `@onclick="() => Count++"`, `@onclick="@(...)"`.
+     */
     razor_attribute_value: ($) =>
       choice(
         // empty value, as its own token so the quotes aren't read as a C# string
@@ -506,71 +668,29 @@ module.exports = grammar(CSHARP, {
     razor_html_attribute: ($) =>
       seq($.razor_attribute_name, optional(seq("=", $.razor_attribute_value))),
 
+    /**
+     * An HTML element or a component, with its content. The closing tag isn't
+     * checked against the opening one.
+     */
     element: ($) =>
       choice(
+        // <tag ...>content</tag> or <tag ... />
         seq(
           "<",
           $._tag_name,
-        optional(
-            repeat(
-              prec.left(
-                seq(
-                  choice(
-                    $._html_attribute,
-                    $._boolean_html_attribute,
-                    $.razor_html_attribute,
-                    $.razor_comment,
-                  ),
-                  optional(" "),
-                ),
-              ),
-            ),
-          ),
+          tagAttributes($),
           choice(
             "/>",
             seq(">", repeat(choice($._node, $._html_text)), $._end_tag),
           ),
         ),
         // void elements may omit the closing "/" (<br>, <input ...>)
-        seq(
-          "<",
-          $._void_tag_name,
-        optional(
-            repeat(
-              prec.left(
-                seq(
-                  choice(
-                    $._html_attribute,
-                    $._boolean_html_attribute,
-                    $.razor_html_attribute,
-                    $.razor_comment,
-                  ),
-                  optional(" "),
-                ),
-              ),
-            ),
-          ),
-          choice("/>", ">"),
-        ),
+        seq("<", $._void_tag_name, tagAttributes($), choice("/>", ">")),
         // raw text elements: content is not parsed as razor/html
         seq(
           "<",
           $._raw_text_tag_name,
-        optional(
-            repeat(
-              prec.left(
-                seq(
-                  choice(
-                    $._html_attribute,
-                    $._boolean_html_attribute,
-                    $.razor_html_attribute,
-                    $.razor_comment,
-                  ),
-                  optional(" "),
-                ),
-              ),
-            ),
-          ),
+          tagAttributes($),
           ">",
           optional($._raw_text),
           "</",
@@ -579,14 +699,17 @@ module.exports = grammar(CSHARP, {
         ),
       ),
 
+    // HTML elements that never have content nor closing tag.
     _void_tag_name: (_) =>
       choice(
         "area", "base", "br", "col", "embed", "hr", "img", "input",
         "link", "meta", "source", "track", "wbr",
       ),
 
+    // Elements whose content is another language (JavaScript, CSS).
     _raw_text_tag_name: (_) => choice("script", "style"),
 
+    // Anything up to the closing tag (approximated as the next `</`).
     _raw_text: (_) => token(prec(-1, /([^<]|<[^\/])+/)),
   },
 });
