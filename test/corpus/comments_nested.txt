@@ -1,0 +1,92 @@
+==================
+switch case labels sharing a body
+==================
+
+@switch (mode)
+{
+    case A.B:
+    case A.C:
+        <p>x</p>
+        break;
+}
+
+---
+
+(compilation_unit
+  (razor_switch
+    (razor_condition
+      (identifier))
+    (razor_switch_case
+      (razor_case_condition)
+      (razor_case_condition)
+      (element))))
+
+==================
+comment between switch cases
+==================
+
+@switch (mode)
+{
+    @* c *@
+    case A.B:
+        <p>x</p>
+        break;
+}
+
+---
+
+(compilation_unit
+  (razor_switch
+    (razor_condition
+      (identifier))
+    (razor_comment)
+    (razor_switch_case
+      (razor_case_condition)
+      (element))))
+
+==================
+comment inside element
+==================
+
+<div>
+    @* c *@
+    <p>x</p>
+</div>
+
+---
+
+(compilation_unit
+  (element
+    (razor_comment)
+    (element)))
+
+==================
+comment inside razor block
+==================
+
+@if (x)
+{
+    @* c *@
+    <p>x</p>
+}
+
+---
+
+(compilation_unit
+  (razor_if
+    (razor_condition
+      (identifier))
+    (razor_comment)
+    (element)))
+
+==================
+comment among tag attributes
+==================
+
+<p class="a" @* c *@>x</p>
+
+---
+
+(compilation_unit
+  (element
+    (razor_comment)))

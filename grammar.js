@@ -1,0 +1,592 @@
+/**
+ * @file Razor grammar for tree-sitter
+ * @author Tristan Knight <admin@snappeh.com>
+ * @license MIT
+ */
+
+/// <reference types="tree-sitter-cli/dsl" />
+// @ts-check
+
+const CSHARP = require("tree-sitter-c-sharp/grammar").default;
+
+module.exports = grammar(CSHARP, {
+  name: "razor",
+
+  extras: ($) => [$.comment, /\s+/],
+
+  conflicts: ($, o) => [
+    [$.razor_explicit_expression, $._expression_statement_expression],
+
+    [
+      $.preproc_if,
+      $.preproc_if_in_top_level,
+      $.preproc_if_in_expression,
+      $.preproc_if_in_attribute_list,
+    ],
+    [$.preproc_if, $.preproc_if_in_top_level],
+    [$.preproc_if, $.preproc_if_in_top_level, $.preproc_if_in_expression],
+    [$.preproc_if, $.preproc_if_in_top_level, $.preproc_if_in_attribute_list],
+    [
+      $.preproc_else,
+      $.preproc_else_in_top_level,
+      $.preproc_else_in_expression,
+      $.preproc_else_in_attribute_list,
+    ],
+    [$.declaration, $.preproc_if_in_top_level],
+    [$.type_declaration, $.declaration],
+    [$.method_declaration, $._local_function_declaration],
+    [$.declaration, $.preproc_else_in_top_level],
+    [
+      $.preproc_elif,
+      $.preproc_elif_in_top_level,
+      $.preproc_elif_in_expression,
+      $.preproc_elif_in_attribute_list,
+    ],
+
+    [$.destructor_declaration, $._simple_name],
+
+    [$.initializer_expression, $.razor_block],
+    [$.field_declaration, $.local_declaration_statement],
+    ...o,
+  ],
+
+  rules: {
+    compilation_unit: ($) =>
+      seq(
+        repeat(
+          choice(
+            $.shebang_directive, // this is to make sharing highlights easier
+            $.razor_page_directive,
+            $.razor_using_directive,
+            $.razor_model_directive,
+            $.razor_rendermode_directive,
+            $.razor_inject_directive,
+            $.razor_implements_directive,
+            $.razor_layout_directive,
+            $.razor_inherits_directive,
+            $.razor_attribute_directive,
+            $.razor_typeparam_directive,
+            $.razor_namespace_directive,
+            $.razor_preservewhitespace_directive,
+            $.razor_addtaghelper_directive,
+            $.razor_removetaghelper_directive,
+            $.razor_taghelperprefix_directive,
+          ),
+        ),
+        repeat(choice($._node, $.razor_block)),
+      ),
+
+    _identifier_token: (_) =>
+      token(
+        // @ts-ignore
+        /(\p{XID_Start}|_|\\u[0-9A-Fa-f]{4}|\\U[0-9A-Fa-f]{8})(\p{XID_Continue}|\\u[0-9A-Fa-f]{4}|\\U[0-9A-Fa-f]{8})*/,
+      ),
+    identifier: ($) => choice($._identifier_token, $._reserved_identifier),
+
+    _csharp_nodes: ($) =>
+      choice(
+        $.statement,
+        $._node,
+
+        $.preproc_region,
+        $.preproc_endregion,
+        $.preproc_line,
+        $.preproc_pragma,
+        $.preproc_nullable,
+        $.preproc_error,
+        $.preproc_warning,
+        $.preproc_define,
+        $.preproc_undef,
+      ),
+
+    block: ($) => seq("{", repeat($._csharp_nodes), "}"),
+
+    _node: ($) =>
+      prec.right(
+        choice(
+          $.razor_comment,
+          $.razor_escape,
+          $.razor_if,
+          $.razor_switch,
+          $.razor_for,
+          $.razor_foreach,
+          $.razor_while,
+          $.razor_do_while,
+          $.razor_try,
+          $.explicit_line_transition,
+          $.razor_implicit_expression,
+          $.razor_explicit_expression,
+          $.razor_section,
+          $.razor_compound_using,
+          $.razor_lock,
+          $.element,
+          $.html_comment,
+        ),
+      ),
+
+    _razor_marker: (_) => token("@"),
+
+    razor_escape: ($) =>
+      seq(alias(/@{2}/, "at_at_escape"), alias($._html_text, $.element)),
+
+    razor_page_directive: ($) =>
+      seq(alias(seq($._razor_marker, "page"), "at_page"), $.string_literal),
+    razor_using_directive: ($) =>
+      seq(
+        alias(seq($._razor_marker, "using"), "at_using"),
+        choice(
+          seq(optional("unsafe"), field("name", $.identifier), "=", $.type),
+          seq(optional("static"), optional("unsafe"), $._name),
+        ),
+      ),
+    razor_model_directive: ($) =>
+      seq(
+        alias(seq($._razor_marker, "model"), "at_model"),
+        field("name", $._name),
+      ),
+    razor_preservewhitespace_directive: ($) =>
+      seq(
+        alias(
+          seq($._razor_marker, "preservewhitespace"),
+          "at_preservewhitespace",
+        ),
+        $.boolean_literal,
+      ),
+    razor_attribute_directive: ($) =>
+      seq(
+        alias(seq($._razor_marker, "attribute"), "at_attribute"),
+        $.attribute_list,
+      ),
+    razor_implements_directive: ($) =>
+      seq(
+        alias(seq($._razor_marker, "implements"), "at_implements"),
+        field("name", $._name),
+      ),
+    razor_layout_directive: ($) =>
+      seq(
+        alias(seq($._razor_marker, "layout"), "at_layout"),
+        field("name", $._name),
+      ),
+    razor_inherits_directive: ($) =>
+      seq(
+        alias(seq($._razor_marker, "inherits"), "at_inherits"),
+        field("name", $._name),
+      ),
+    razor_typeparam_directive: ($) =>
+      seq(
+        alias(seq($._razor_marker, "typeparam"), "at_typeparam"),
+        field("name", $._name),
+      ),
+    razor_inject_directive: ($) =>
+      seq(
+        alias(seq($._razor_marker, "inject"), "at_inject"),
+        $.variable_declaration,
+      ),
+    razor_namespace_directive: ($) =>
+      seq(
+        alias(seq($._razor_marker, "namespace"), "at_namespace"),
+        $.qualified_name,
+      ),
+    razor_rendermode_directive: ($) =>
+      seq(
+        alias(seq($._razor_marker, "rendermode"), "at_rendermode"),
+        $.razor_rendermode,
+      ),
+    razor_rendermode: (_) =>
+      choice("InteractiveServer", "InteractiveWebAssembly", "InteractiveAuto"),
+
+    _taghelper_target: ($) =>
+      seq(
+        choice($.identifier, alias("*", $.taghelper_wildcard)),
+        ",",
+        field("assembly", $._name),
+      ),
+    razor_addtaghelper_directive: ($) =>
+      seq(
+        alias(seq($._razor_marker, "addTagHelper"), "at_addtaghelper"),
+        choice($.string_literal, $._taghelper_target),
+      ),
+    razor_removetaghelper_directive: ($) =>
+      seq(
+        alias(seq($._razor_marker, "removeTagHelper"), "at_removetaghelper"),
+        choice($.string_literal, $._taghelper_target),
+      ),
+    razor_taghelperprefix_directive: ($) =>
+      seq(
+        alias(seq($._razor_marker, "tagHelperPrefix"), "at_taghelperprefix"),
+        choice($.string_literal, $.identifier),
+      ),
+
+    razor_block: ($) =>
+      prec.left(
+        seq(
+          alias(
+            seq($._razor_marker, optional(choice("code", "functions"))),
+            "at_block",
+          ),
+          "{",
+          repeat(choice($.declaration, seq($.statement), $._node)),
+          "}",
+        ),
+      ),
+
+    razor_explicit_expression: ($) =>
+      prec.right(
+        seq(
+          alias($._razor_marker, "at_explicit"),
+          prec.right($.parenthesized_expression),
+        ),
+      ),
+
+    razor_implicit_expression: ($) =>
+      seq(alias($._razor_marker, "at_implicit"), prec.left($.expression)),
+
+    razor_lock: ($) =>
+      seq(
+        alias(seq($._razor_marker, "lock"), "at_lock"),
+        "(",
+        $.expression,
+        ")",
+        "{",
+        $._blended_content,
+        "}",
+      ),
+
+    razor_compound_using: ($) =>
+      seq(
+        alias(seq($._razor_marker, "using"), "at_using"),
+        "(",
+        choice(
+          alias($.using_variable_declaration, $.variable_declaration),
+          $.expression,
+        ),
+        ")",
+        "{",
+        $._blended_content,
+        "}",
+      ),
+
+    razor_if: ($) =>
+      seq(
+        alias(seq($._razor_marker, "if"), "at_if"),
+        $.razor_condition,
+        seq("{", $._blended_content, "}"),
+        repeat(choice($.razor_else_if, $.razor_else)),
+      ),
+
+    razor_try: ($) =>
+      prec.right(
+        seq(
+          alias(seq($._razor_marker, "try"), "at_try"),
+          "{",
+          $._blended_content,
+          "}",
+          repeat(choice($.razor_catch, $.razor_finally)),
+        ),
+      ),
+
+    razor_catch: ($) =>
+      seq(
+        token(prec(10, "catch")),
+        repeat(choice($.catch_declaration, $.catch_filter_clause)),
+        "{",
+        $._blended_content,
+        "}",
+      ),
+
+    razor_finally: ($) =>
+      seq(
+        token(prec(10, "finally")),
+        "{",
+        $._blended_content,
+        "}"
+      ),
+
+    razor_else_if: ($) =>
+      seq(
+        token(prec(10, "else")),
+        "if",
+        $.razor_condition,
+        "{",
+        $._blended_content,
+        "}"
+      ),
+
+    razor_else: ($) =>
+      seq(
+        token(prec(10, "else")),
+        "{",
+        $._blended_content,
+        "}"
+      ),
+
+    razor_switch: ($) =>
+      seq(
+        alias(seq($._razor_marker, "switch"), "at_switch"),
+        $.razor_condition,
+        "{",
+        repeat(
+          choice($.razor_switch_case, $.razor_switch_default, $.razor_comment),
+        ),
+        "}",
+      ),
+
+    razor_condition: ($) => prec(10, seq("(", $.expression, ")")),
+
+    razor_switch_case: ($) =>
+      prec.left(
+        seq(
+          // several labels may share one body (case A: case B:)
+          repeat1(seq("case", $.razor_case_condition, ":")),
+          $._blended_content,
+          optional("break;"),
+        ),
+      ),
+
+    razor_switch_default: ($) =>
+      prec.right(seq("default", ":", $._blended_content, optional("break;"))),
+
+    razor_case_condition: (_) => /[^:]+/,
+
+    _razor_for_initializer: ($) =>
+      seq(
+        alias(seq($._razor_marker, "for"), "at_for"),
+        "(",
+        field(
+          "initializer",
+          optional(choice($.variable_declaration, $.expression)),
+        ),
+        ";",
+        field("condition", optional($.expression)),
+        ";",
+        field("update", optional($.expression)),
+        ")",
+      ),
+
+    razor_for: ($) =>
+      seq(
+        $._razor_for_initializer,
+        "{",
+        field("body", $._blended_content),
+        "}",
+      ),
+
+    _blended_content: ($) =>
+      repeat1(
+        prec(
+          10,
+          choice($._node, $.explicit_line_transition, $.statement, $.comment),
+        ),
+      ),
+
+    _razor_foreach_initializer: ($) =>
+      seq(
+        alias(seq($._razor_marker, "foreach"), "at_foreach"),
+        "(",
+        choice(
+          seq(
+            field("type", $.type),
+            field("left", choice($.identifier, $.tuple_pattern)),
+          ),
+          field("left", $.expression),
+        ),
+        "in",
+        field("right", $.expression),
+        ")",
+      ),
+
+    razor_foreach: ($) =>
+      seq(
+        $._razor_foreach_initializer,
+        "{",
+        field("body", $._blended_content),
+        "}",
+      ),
+
+    razor_while: ($) =>
+      seq(
+        alias(seq($._razor_marker, "while"), "at_while"),
+        $.razor_condition,
+        "{",
+        $._blended_content,
+        "}",
+      ),
+
+    _razor_while_condition: ($) => seq("while", $.razor_condition),
+
+    razor_do_while: ($) =>
+      seq(
+        alias(seq($._razor_marker, "do"), "at_do"),
+        "{",
+        $._blended_content,
+        "}",
+        $._razor_while_condition,
+        ";",
+      ),
+
+    razor_section: ($) =>
+      seq(
+        alias(seq($._razor_marker, "section"), "at_section"),
+        $.identifier,
+        "{",
+        $._blended_content,
+        "}",
+      ),
+
+    explicit_line_transition: ($) =>
+      prec.left(
+        seq(
+          alias("@:", "at_colon_transition"),
+          alias(token(prec(1, /[^\n\r]+/)), $.element),
+        ),
+      ),
+
+    razor_comment: ($) => seq("@*", optional($._razor_comment_text), "*@"),
+    _razor_comment_text: (_) => repeat1(/.|\n|\r/),
+    razor_attribute_name: ($) =>
+      seq(
+        $._razor_marker,
+        seq(
+          choice(
+            "attributes",
+            "bind",
+            "formname",
+            token(prec(10, /on[a-z]+/i)),
+            "key",
+            "ref",
+            token(prec(-1, /[a-zA-Z_][a-zA-Z0-9_]*/)),
+          ),
+          optional($.razor_attribute_modifier),
+        ),
+      ),
+
+    razor_attribute_modifier: (_) =>
+      choice(":culture", ":preventDefault", ":stopPropagation"),
+
+    html_comment: ($) => seq("<!--", optional($._razor_comment_text), "-->"),
+    _html_comment_text: (_) => repeat1(/.|\n|\r/),
+
+    // HTML Base Definitions
+    _tag_name: (_) => /[a-zA-Z0-9-:]+/,
+    _end_tag: ($) => seq("</", $._tag_name, ">"),
+    _html_attribute_name: (_) => /[a-zA-Z0-9-:]+/,
+    _boolean_html_attribute: (_) => /[a-zA-Z0-9-:]+/,
+    _html_attribute_value: ($) =>
+      seq(
+        '"',
+        repeat(
+          choice(
+            $.razor_explicit_expression,
+            $.razor_implicit_expression,
+            /[^"@]+/,
+          ),
+        ),
+        '"',
+      ),
+    _html_text: (_) => /[^<>&@.(\s]([^<>&@]*[^<>&@\s])?/,
+
+    razor_attribute_value: ($) =>
+      choice(
+        // empty value, as its own token so the quotes aren't read as a C# string
+        token(prec(1, '""')),
+        seq(
+          '"',
+          choice(
+            seq(optional($.modifier), $.expression),
+            $.razor_explicit_expression,
+            $.razor_implicit_expression,
+          ),
+          '"',
+        ),
+      ),
+
+    _html_attribute: ($) =>
+      seq($._html_attribute_name, "=", $._html_attribute_value),
+
+    razor_html_attribute: ($) =>
+      seq($.razor_attribute_name, optional(seq("=", $.razor_attribute_value))),
+
+    element: ($) =>
+      choice(
+        seq(
+          "<",
+          $._tag_name,
+        optional(
+            repeat(
+              prec.left(
+                seq(
+                  choice(
+                    $._html_attribute,
+                    $._boolean_html_attribute,
+                    $.razor_html_attribute,
+                    $.razor_comment,
+                  ),
+                  optional(" "),
+                ),
+              ),
+            ),
+          ),
+          choice(
+            "/>",
+            seq(">", repeat(choice($._node, $._html_text)), $._end_tag),
+          ),
+        ),
+        // void elements may omit the closing "/" (<br>, <input ...>)
+        seq(
+          "<",
+          $._void_tag_name,
+        optional(
+            repeat(
+              prec.left(
+                seq(
+                  choice(
+                    $._html_attribute,
+                    $._boolean_html_attribute,
+                    $.razor_html_attribute,
+                    $.razor_comment,
+                  ),
+                  optional(" "),
+                ),
+              ),
+            ),
+          ),
+          choice("/>", ">"),
+        ),
+        // raw text elements: content is not parsed as razor/html
+        seq(
+          "<",
+          $._raw_text_tag_name,
+        optional(
+            repeat(
+              prec.left(
+                seq(
+                  choice(
+                    $._html_attribute,
+                    $._boolean_html_attribute,
+                    $.razor_html_attribute,
+                    $.razor_comment,
+                  ),
+                  optional(" "),
+                ),
+              ),
+            ),
+          ),
+          ">",
+          optional($._raw_text),
+          "</",
+          $._raw_text_tag_name,
+          ">",
+        ),
+      ),
+
+    _void_tag_name: (_) =>
+      choice(
+        "area", "base", "br", "col", "embed", "hr", "img", "input",
+        "link", "meta", "source", "track", "wbr",
+      ),
+
+    _raw_text_tag_name: (_) => choice("script", "style"),
+
+    _raw_text: (_) => token(prec(-1, /([^<]|<[^\/])+/)),
+  },
+});

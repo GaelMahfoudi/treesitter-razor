@@ -1,0 +1,133 @@
+==================
+void element without closing slash
+==================
+
+<br>
+
+---
+
+(compilation_unit
+  (element))
+
+==================
+void element with attributes
+==================
+
+<input type="text" value="x">
+
+---
+
+(compilation_unit
+  (element))
+
+==================
+void element followed by code block
+==================
+
+<input type="text">
+@code {
+  private int count = 0;
+}
+
+---
+
+(compilation_unit
+  (element)
+  (razor_block
+    (field_declaration
+      (modifier)
+      (variable_declaration
+        (predefined_type)
+        (variable_declarator
+          (identifier)
+          (integer_literal))))))
+
+==================
+custom razor attribute
+==================
+
+<Comp @OnSelect="HandleSelect"></Comp>
+
+---
+
+(compilation_unit
+  (element
+    (razor_html_attribute
+      (razor_attribute_name)
+      (razor_attribute_value
+        (identifier)))))
+
+==================
+empty razor attribute value
+==================
+
+<MyButton @onclick=""></MyButton>
+
+---
+
+(compilation_unit
+  (element
+    (razor_html_attribute
+      (razor_attribute_name)
+      (razor_attribute_value))))
+
+==================
+explicit expression in razor attribute value
+==================
+
+<button @onclick="@(() => Select(item))">+</button>
+
+---
+
+(compilation_unit
+  (element
+    (razor_html_attribute
+      (razor_attribute_name)
+      (razor_attribute_value
+        (razor_explicit_expression
+          (parenthesized_expression
+            (lambda_expression
+              (parameter_list)
+              (invocation_expression
+                (identifier)
+                (argument_list
+                  (argument
+                    (identifier)))))))))))
+
+==================
+implicit expression in razor attribute value
+==================
+
+<button @onclick="@Handle">+</button>
+
+---
+
+(compilation_unit
+  (element
+    (razor_html_attribute
+      (razor_attribute_name)
+      (razor_attribute_value
+        (razor_implicit_expression
+          (identifier))))))
+
+==================
+script element raw text
+==================
+
+<script>let a = 1 < 2;</script>
+
+---
+
+(compilation_unit
+  (element))
+
+==================
+style element raw text
+==================
+
+<style>p > a { color: red; }</style>
+
+---
+
+(compilation_unit
+  (element))
