@@ -567,9 +567,13 @@ Person? secondAuthor)
     (element
       (element
         (razor_implicit_expression
-          (identifier))
+          (member_access_expression
+            (identifier)
+            (identifier)))
         (razor_implicit_expression
-          (identifier)))
+          (member_access_expression
+            (identifier)
+            (identifier))))
       (razor_if
         (razor_condition
           (binary_expression
@@ -577,9 +581,13 @@ Person? secondAuthor)
             (null_literal)))
         (element
           (razor_implicit_expression
-            (identifier))
+            (member_access_expression
+              (identifier)
+              (identifier)))
           (razor_implicit_expression
-            (identifier)))))
+            (member_access_expression
+              (identifier)
+              (identifier))))))
     (element
       (element
         (razor_explicit_expression

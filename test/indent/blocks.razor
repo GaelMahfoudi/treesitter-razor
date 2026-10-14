@@ -1,0 +1,18 @@
+@{
+    var title = "Fruits";
+    var count = fruits.Count;
+}
+
+<h1>@title</h1>
+
+@{
+    <p>Markup in a code block</p>
+    if (count > 0)
+    {
+        <p>@count fruits</p>
+    }
+}
+
+<button @onclick="() => {
+    count++;
+    }">Add</button>

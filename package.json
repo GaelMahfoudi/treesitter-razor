@@ -9,6 +9,7 @@
   },
   "scripts": {
     "generate": "tree-sitter generate",
-    "test": "tree-sitter test"
+    "test": "tree-sitter test",
+    "test:indent": "mkdir -p build && tree-sitter build -o build/razor.so && nvim --headless --clean -l test/indent.lua"
   }
 }

@@ -17,6 +17,10 @@ enum TokenType {
     RAW_STRING_START,
     RAW_STRING_END,
     RAW_STRING_CONTENT,
+    IMPLICIT_DOT,
+    IMPLICIT_QUESTION_MARK,
+    IMPLICIT_OPEN_PAREN,
+    IMPLICIT_OPEN_BRACKET,
 };
 
 typedef enum {
@@ -117,6 +121,32 @@ bool tree_sitter_razor_external_scanner_scan(void *payload, TSLexer *lexer, cons
     // error recovery, gives better trees this way
     if (valid_symbols[OPT_SEMI] && valid_symbols[INTERPOLATION_REGULAR_START]) {
         return false;
+    }
+
+    // Razor implicit expressions (`@user.Name`): `.` continues the expression
+    // only when an identifier follows it, `?` only when `.` or `[` follows it.
+    // No whitespace is skipped: `@user.Name .Trim()` ends at `Name`.
+    if (valid_symbols[IMPLICIT_OPEN_PAREN] && lexer->lookahead == '(') {
+        advance(lexer);
+        lexer->result_symbol = IMPLICIT_OPEN_PAREN;
+        return true;
+    }
+    if (valid_symbols[IMPLICIT_OPEN_BRACKET] && lexer->lookahead == '[') {
+        advance(lexer);
+        lexer->result_symbol = IMPLICIT_OPEN_BRACKET;
+        return true;
+    }
+    if (valid_symbols[IMPLICIT_DOT] && lexer->lookahead == '.') {
+        advance(lexer);
+        lexer->mark_end(lexer);
+        lexer->result_symbol = IMPLICIT_DOT;
+        return iswalpha(lexer->lookahead) || lexer->lookahead == '_';
+    }
+    if (valid_symbols[IMPLICIT_QUESTION_MARK] && lexer->lookahead == '?') {
+        advance(lexer);
+        lexer->mark_end(lexer);
+        lexer->result_symbol = IMPLICIT_QUESTION_MARK;
+        return lexer->lookahead == '.' || lexer->lookahead == '[';
     }
 
     if (valid_symbols[OPT_SEMI]) {

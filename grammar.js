@@ -54,6 +54,17 @@ const tagAttributes = ($) =>
 module.exports = grammar(CSHARP, {
   name: "razor",
 
+  externals: ($, original) => [
+    ...original,
+    // `.`, `?`, `(` and `[` continuing an implicit expression: they must
+    // follow it without a space, and take precedence over markup text (see
+    // src/scanner.c)
+    $._implicit_dot,
+    $._implicit_question_mark,
+    $._implicit_open_paren,
+    $._implicit_open_bracket,
+  ],
+
   // razor_comment is deliberately NOT an extra: a node that is both an extra
   // and part of other rules makes the parser fail at the end of the file as
   // soon as a comment is nested in an element or a block. It is listed
@@ -63,8 +74,6 @@ module.exports = grammar(CSHARP, {
   // Mostly inherited from the C# grammar (preprocessor directives can appear
   // at several levels), plus the ambiguities added by Razor.
   conflicts: ($, o) => [
-    [$.razor_explicit_expression, $._expression_statement_expression],
-
     [
       $.preproc_if,
       $.preproc_if_in_top_level,
@@ -93,8 +102,6 @@ module.exports = grammar(CSHARP, {
 
     [$.destructor_declaration, $._simple_name],
 
-    // `@{` starts a code block, but `{` can also open a C# initializer
-    [$.initializer_expression, $.razor_block],
     [$.field_declaration, $.local_declaration_statement],
     ...o,
   ],
@@ -336,17 +343,99 @@ module.exports = grammar(CSHARP, {
       ),
 
     // @(expression): the expression is delimited by the parentheses.
+    // (C# splits `(x)` and `(x + 1)` into two rules, any expression goes here)
     razor_explicit_expression: ($) =>
-      prec.right(
-        seq(
-          alias($._razor_marker, "at_explicit"),
-          prec.right($.parenthesized_expression),
+      seq(
+        alias($._razor_marker, "at_explicit"),
+        alias($._razor_parenthesized_expression, $.parenthesized_expression),
+      ),
+
+    _razor_parenthesized_expression: ($) => seq("(", $.expression, ")"),
+
+    /**
+     * @expression: unlike in C#, the expression can't contain spaces. It is a
+     * chain of member accesses, calls and indexers (`@user.Name`,
+     * `@items[0].Format("x")`, `@user?.Name`), optionally awaited
+     * (`@await LoadAsync()`). It ends at the first character that can't
+     * continue the chain: in `@user.Name <br />` or `@user.Name.` the `<` and
+     * the final `.` are markup. Anything else needs `@(...)`.
+     */
+    razor_implicit_expression: ($) =>
+      seq(
+        alias($._razor_marker, "at_implicit"),
+        choice(
+          $._implicit_value,
+          alias($._implicit_await_expression, $.await_expression),
         ),
       ),
 
-    // @expression: the expression ends where the C# expression ends.
-    razor_implicit_expression: ($) =>
-      seq(alias($._razor_marker, "at_implicit"), prec.left($.expression)),
+    _implicit_await_expression: ($) =>
+      prec(1, seq("await", $._implicit_value)),
+
+    // The node types are the C# ones, so that the C# queries apply.
+    _implicit_value: ($) =>
+      choice(
+        $.identifier,
+        $.boolean_literal,
+        $.null_literal,
+        alias($._implicit_member_access, $.member_access_expression),
+        alias($._implicit_conditional_access, $.conditional_access_expression),
+        alias($._implicit_invocation, $.invocation_expression),
+        alias($._implicit_element_access, $.element_access_expression),
+      ),
+
+    _implicit_member_access: ($) =>
+      seq(
+        field("expression", $._implicit_value),
+        alias($._implicit_dot, "."),
+        field("name", $.identifier),
+      ),
+
+    _implicit_conditional_access: ($) =>
+      seq(
+        field("condition", $._implicit_value),
+        alias($._implicit_question_mark, "?"),
+        choice(
+          alias($._implicit_member_binding, $.member_binding_expression),
+          alias($._implicit_element_binding, $.element_binding_expression),
+        ),
+      ),
+
+    _implicit_member_binding: ($) =>
+      seq(alias($._implicit_dot, "."), field("name", $.identifier)),
+
+    _implicit_element_binding: ($) =>
+      alias($._implicit_bracketed_argument_list, $.bracketed_argument_list),
+
+    _implicit_invocation: ($) =>
+      seq(
+        field("function", $._implicit_value),
+        field("arguments", alias($._implicit_argument_list, $.argument_list)),
+      ),
+
+    _implicit_element_access: ($) =>
+      seq(
+        field("expression", $._implicit_value),
+        field(
+          "subscript",
+          alias($._implicit_bracketed_argument_list, $.bracketed_argument_list),
+        ),
+      ),
+
+    _implicit_argument_list: ($) =>
+      seq(
+        alias($._implicit_open_paren, "("),
+        optional(seq($.argument, repeat(seq(",", $.argument)))),
+        ")",
+      ),
+
+    _implicit_bracketed_argument_list: ($) =>
+      seq(
+        alias($._implicit_open_bracket, "["),
+        $.argument,
+        repeat(seq(",", $.argument)),
+        "]",
+      ),
 
     // ------------------------------------------------------------------------
     // Control structures
@@ -641,7 +730,7 @@ module.exports = grammar(CSHARP, {
         '"',
       ),
     // Text between tags. Stops at `@` so that Razor code is found in it.
-    _html_text: (_) => /[^<>&@.(\s]([^<>&@]*[^<>&@\s])?/,
+    _html_text: (_) => /[^<>&@\s]([^<>&@]*[^<>&@\s])?/,
 
     /**
      * The value of a Razor attribute is C# code, not text:

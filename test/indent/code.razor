@@ -1,0 +1,48 @@
+@code {
+    [Parameter]
+    public string Name { get; set; } = "";
+
+    private List<Fruit> fruits = new();
+    private Dictionary<string, int> stock = new()
+    {
+        ["apple"] = 3,
+        ["pear"] = 5,
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        fruits = await Basket.GetFruitsAsync(
+            includeRotten: false,
+            limit: 10);
+        if (fruits.Count > 0)
+        {
+            Selected = fruits[0];
+        }
+        else
+        {
+            Selected = null;
+        }
+        foreach (var fruit in fruits)
+        {
+            switch (fruit.Kind)
+            {
+                case Kind.Berry:
+                case Kind.Drupe:
+                    berries++;
+                    break;
+                default:
+                    others++;
+                    break;
+            }
+        }
+        Basket.Changed += (sender, args) =>
+        {
+            StateHasChanged();
+        };
+        await InvokeAsync(() => {
+            StateHasChanged();
+        });
+    }
+
+    private void Select(Fruit fruit) => Selected = fruit;
+}

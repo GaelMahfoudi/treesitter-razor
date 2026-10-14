@@ -1,0 +1,24 @@
+@page "/fruits"
+
+<PageTitle>Fruits</PageTitle>
+
+<div class="basket">
+    <h1>Fruits</h1>
+    <ul>
+        <li>Apple</li>
+        <li>
+            @fruit.Name
+            <br />
+            Plum
+            <br>
+            <img src="cherry.png">
+        </li>
+    </ul>
+    <FruitCard Name="Apple"
+        Color="red" />
+    <FruitCard
+        Name="Pear"
+        Color="green">
+        <span>ripe</span>
+    </FruitCard>
+</div>

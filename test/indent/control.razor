@@ -1,0 +1,48 @@
+<div>
+    @if (showFruits)
+    {
+        <p>Fruits</p>
+    }
+    else if (showVegetables)
+    {
+        <p>Vegetables</p>
+    }
+    else
+    {
+        <p>Nothing</p>
+    }
+
+    @if (showFruits) {
+        <p>K&amp;R style</p>
+    } else {
+        <p>also works</p>
+    }
+
+    @foreach (var fruit in fruits)
+    {
+        <FruitCard Name="@fruit.Name" />
+    }
+
+    @for (var i = 0; i < 3; i++)
+    {
+        <span>@i</span>
+    }
+
+    @while (count > 0)
+    {
+        count--;
+    }
+
+    @try
+    {
+        <span>@Risky()</span>
+    }
+    catch (Exception ex)
+    {
+        <span>@ex.Message</span>
+    }
+    finally
+    {
+        <span>done</span>
+    }
+</div>
